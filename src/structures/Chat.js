@@ -201,17 +201,16 @@ class Chat extends Base {
      * @returns {Promise<Array<Message>>}
      */
     async fetchMessages(searchOptions) {
+        const limit = searchOptions?.limit;
+        const fromMe = searchOptions?.fromMe;
+
         let messages = await this.client.pupPage.evaluate(
-            async (chatId, searchOptions) => {
+            async (chatId, limit, fromMe) => {
                 const msgFilter = (m) => {
                     if (m.isNotification) {
                         return false; // dont include notification messages
                     }
-                    if (
-                        searchOptions &&
-                        searchOptions.fromMe !== undefined &&
-                        m.id.fromMe !== searchOptions.fromMe
-                    ) {
+                    if (fromMe !== undefined && m.id.fromMe !== fromMe) {
                         return false;
                     }
                     return true;
@@ -222,25 +221,26 @@ class Chat extends Base {
                 });
                 let msgs = chat.msgs.getModelsArray().filter(msgFilter);
 
-                if (searchOptions && searchOptions.limit > 0) {
-                    while (msgs.length < searchOptions.limit) {
+                if (typeof limit === 'number' && limit > 0) {
+                    while (msgs.length < limit) {
                         const loadedMessages = await window
                             .require('WAWebChatLoadMessages')
-                            .loadEarlierMsgs(chat, chat.msgs);
+                            .loadEarlierMsgs({ chat });
                         if (!loadedMessages || !loadedMessages.length) break;
                         msgs = [...loadedMessages.filter(msgFilter), ...msgs];
                     }
 
-                    if (msgs.length > searchOptions.limit) {
+                    if (msgs.length > limit) {
                         msgs.sort((a, b) => (a.t > b.t ? 1 : -1));
-                        msgs = msgs.splice(msgs.length - searchOptions.limit);
+                        msgs = msgs.slice(-limit);
                     }
                 }
 
                 return msgs.map((m) => window.WWebJS.getMessageModel(m));
             },
             this.id._serialized,
-            searchOptions,
+            limit,
+            fromMe,
         );
 
         return messages.map((m) => new Message(this.client, m));
