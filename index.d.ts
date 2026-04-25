@@ -198,7 +198,7 @@ declare namespace WAWebJS {
         ): Promise<string>;
 
         /** Cancels an active pairing code session and returns to QR code mode */
-        cancelPairingCode(): Promise<void>
+        cancelPairingCode(): Promise<void>;
 
         /** Force reset of connection state for the client */
         resetState(): Promise<void>;
@@ -2060,6 +2060,16 @@ declare namespace WAWebJS {
          * Return only messages from the bot number or vise versa. To get all messages, leave the option undefined.
          */
         fromMe?: boolean;
+        /**
+         * Unix timestamp (seconds). Stop loading earlier messages once the oldest loaded message is at or before
+         * this value. Allows early termination without fetching the full limit.
+         */
+        stopAtTimestamp?: number;
+        /**
+         * Milliseconds to wait between each internal loadEarlierMsgs page request.
+         * Use to avoid triggering WhatsApp rate limits when loading large histories.
+         */
+        pageDelayMs?: number;
     }
 
     /**

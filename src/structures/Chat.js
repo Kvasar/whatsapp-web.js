@@ -195,17 +195,21 @@ class Chat extends Base {
 
     /**
      * Loads chat messages, sorted from earliest to latest.
-     * @param {Object} searchOptions Options for searching messages. Right now only limit and fromMe is supported.
+     * @param {Object} searchOptions Options for searching messages.
      * @param {Number} [searchOptions.limit] The amount of messages to return. If no limit is specified, the available messages will be returned. Note that the actual number of returned messages may be smaller if there aren't enough messages in the conversation. Set this to Infinity to load all messages.
      * @param {Boolean} [searchOptions.fromMe] Return only messages from the bot number or vise versa. To get all messages, leave the option undefined.
+     * @param {Number} [searchOptions.stopAtTimestamp] Unix timestamp (seconds). Stop loading earlier messages once the oldest loaded message is at or before this value. Allows early termination without fetching the full limit.
+     * @param {Number} [searchOptions.pageDelayMs] Milliseconds to wait between each internal loadEarlierMsgs page request. Use to avoid triggering WhatsApp rate limits when loading large histories.
      * @returns {Promise<Array<Message>>}
      */
     async fetchMessages(searchOptions) {
         const limit = searchOptions?.limit;
         const fromMe = searchOptions?.fromMe;
+        const stopAtTimestamp = searchOptions?.stopAtTimestamp ?? 0;
+        const pageDelayMs = searchOptions?.pageDelayMs ?? 0;
 
         let messages = await this.client.pupPage.evaluate(
-            async (chatId, limit, fromMe) => {
+            async (chatId, limit, fromMe, stopAtTimestamp, pageDelayMs) => {
                 const msgFilter = (m) => {
                     if (m.isNotification) {
                         return false; // dont include notification messages
@@ -221,8 +225,31 @@ class Chat extends Base {
                 });
                 let msgs = chat.msgs.getModelsArray().filter(msgFilter);
 
+                const oldestTimestamp = () =>
+                    msgs.length > 0
+                        ? msgs.reduce(
+                              (min, m) => (m.t < min ? m.t : min),
+                              msgs[0].t,
+                          )
+                        : Infinity;
+
+                const shouldStop = () => {
+                    if (
+                        stopAtTimestamp > 0 &&
+                        oldestTimestamp() <= stopAtTimestamp
+                    ) {
+                        return true;
+                    }
+                    return false;
+                };
+
                 if (typeof limit === 'number' && limit > 0) {
-                    while (msgs.length < limit) {
+                    while (msgs.length < limit && !shouldStop()) {
+                        if (pageDelayMs > 0) {
+                            await new Promise((r) =>
+                                setTimeout(r, pageDelayMs),
+                            );
+                        }
                         const loadedMessages = await window
                             .require('WAWebChatLoadMessages')
                             .loadEarlierMsgs({ chat });
@@ -241,6 +268,8 @@ class Chat extends Base {
             this.id._serialized,
             limit,
             fromMe,
+            stopAtTimestamp,
+            pageDelayMs,
         );
 
         return messages.map((m) => new Message(this.client, m));
