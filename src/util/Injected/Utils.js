@@ -919,20 +919,37 @@ exports.LoadUtils = () => {
 
     window.WWebJS.getChats = async () => {
         const chats = window.require('WAWebCollections').Chat.getModelsArray();
-        const chatPromises = chats.map((chat) =>
-            window.WWebJS.getChatModel(chat),
+        // One broken chat (e.g. groupMetadata.update throwing a minified WA
+        // error like "r") used to reject the entire Promise.all. Soft-fail
+        // per chat so getChats remains usable.
+        const results = await Promise.all(
+            chats.map(async (chat) => {
+                try {
+                    return await window.WWebJS.getChatModel(chat);
+                } catch (_) {
+                    return null;
+                }
+            }),
         );
-        return await Promise.all(chatPromises);
+        return results.filter(Boolean);
     };
 
     window.WWebJS.getChannels = async () => {
         const channels = window
             .require('WAWebCollections')
             .WAWebNewsletterCollection.getModelsArray();
-        const channelPromises = channels?.map((channel) =>
-            window.WWebJS.getChatModel(channel, { isChannel: true }),
+        const results = await Promise.all(
+            (channels || []).map(async (channel) => {
+                try {
+                    return await window.WWebJS.getChatModel(channel, {
+                        isChannel: true,
+                    });
+                } catch (_) {
+                    return null;
+                }
+            }),
         );
-        return await Promise.all(channelPromises);
+        return results.filter(Boolean);
     };
 
     window.WWebJS.getChatModel = async (chat, { isChannel = false } = {}) => {
@@ -957,14 +974,30 @@ exports.LoadUtils = () => {
             const groupMetadata =
                 window.require('WAWebCollections').GroupMetadata ||
                 window.require('WAWebCollections').WAWebGroupMetadataCollection;
-            await groupMetadata.update(chatWid);
-            const { toPn } = window.require('WAWebLidMigrationUtils');
-            const serializedMetadata = chat.groupMetadata.serialize();
-            for (const p of serializedMetadata.participants || []) {
-                p.id = toPn(p.id) ?? p.id;
+            // WA Web module paths / update() can fail intermittently; keep
+            // whatever metadata is already cached on the chat model.
+            if (typeof groupMetadata?.update === 'function') {
+                try {
+                    await groupMetadata.update(chatWid);
+                } catch (_) {
+                    /* ignore WA metadata update failures */
+                }
             }
-            model.groupMetadata = serializedMetadata;
-            model.isReadOnly = chat.groupMetadata.announce;
+            try {
+                const { toPn } = window.require('WAWebLidMigrationUtils');
+                const serializedMetadata = chat.groupMetadata.serialize();
+                for (const p of serializedMetadata.participants || []) {
+                    try {
+                        p.id = toPn(p.id) ?? p.id;
+                    } catch (_) {
+                        /* keep original participant id */
+                    }
+                }
+                model.groupMetadata = serializedMetadata;
+                model.isReadOnly = chat.groupMetadata.announce;
+            } catch (_) {
+                /* keep model without groupMetadata if serialize fails */
+            }
         }
 
         if (chat.newsletterMetadata) {
@@ -973,29 +1006,43 @@ exports.LoadUtils = () => {
                     .NewsletterMetadataCollection ||
                 window.require('WAWebCollections')
                     .WAWebNewsletterMetadataCollection;
-            await newsletterMetadata.update(chat.id);
-            model.channelMetadata = chat.newsletterMetadata.serialize();
-            model.channelMetadata.createdAtTs =
-                chat.newsletterMetadata.creationTime;
+            if (typeof newsletterMetadata?.update === 'function') {
+                try {
+                    await newsletterMetadata.update(chat.id);
+                } catch (_) {
+                    /* ignore channel metadata update failures */
+                }
+            }
+            try {
+                model.channelMetadata = chat.newsletterMetadata.serialize();
+                model.channelMetadata.createdAtTs =
+                    chat.newsletterMetadata.creationTime;
+            } catch (_) {
+                /* keep model without channelMetadata if serialize fails */
+            }
         }
 
         model.lastMessage = null;
         if (model.msgs && model.msgs.length) {
-            const lastMessage = chat.lastReceivedKey
-                ? window
-                      .require('WAWebCollections')
-                      .Msg.get(chat.lastReceivedKey._serialized) ||
-                  (
-                      await window
+            try {
+                const lastMessage = chat.lastReceivedKey
+                    ? window
                           .require('WAWebCollections')
-                          .Msg.getMessagesById([
-                              chat.lastReceivedKey._serialized,
-                          ])
-                  )?.messages?.[0]
-                : null;
-            lastMessage &&
-                (model.lastMessage =
-                    window.WWebJS.getMessageModel(lastMessage));
+                          .Msg.get(chat.lastReceivedKey._serialized) ||
+                      (
+                          await window
+                              .require('WAWebCollections')
+                              .Msg.getMessagesById([
+                                  chat.lastReceivedKey._serialized,
+                              ])
+                      )?.messages?.[0]
+                    : null;
+                lastMessage &&
+                    (model.lastMessage =
+                        window.WWebJS.getMessageModel(lastMessage));
+            } catch (_) {
+                /* last message is optional */
+            }
         }
 
         delete model.msgs;
