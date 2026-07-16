@@ -1,3 +1,4 @@
+const fs = require('fs');
 const { Client, Location, Poll, List, Buttons, LocalAuth } = require('./index');
 
 const client = new Client({
@@ -119,6 +120,7 @@ client.on('message', async (msg) => {
             await client.acceptInvite(inviteCode);
             msg.reply('Joined the group!');
         } catch (e) {
+            console.error(e);
             msg.reply('That invite code seems to be invalid.');
         }
     } else if (msg.body.startsWith('!addmembers')) {
@@ -150,7 +152,7 @@ client.on('message', async (msg) => {
          * }
          *
          * For more usage examples:
-         * @see https://github.com/pedroslopez/whatsapp-web.js/pull/2344#usage-example1
+         * @see https://github.com/wwebjs/whatsapp-web.js/pull/2344#usage-example1
          */
         console.log(result);
     } else if (msg.body === '!creategroup') {
@@ -201,7 +203,7 @@ client.on('message', async (msg) => {
          * }
          *
          * For more usage examples:
-         * @see https://github.com/pedroslopez/whatsapp-web.js/pull/2344#usage-example2
+         * @see https://github.com/wwebjs/whatsapp-web.js/pull/2344#usage-example2
          */
         console.log(result);
     } else if (msg.body === '!groupinfo') {
@@ -232,6 +234,18 @@ client.on('message', async (msg) => {
             Platform: ${info.platform}
         `,
         );
+    } else if (msg.body === '!streamdownload' && msg.hasMedia) {
+        const result = await msg.downloadMediaStream();
+        if (result) {
+            const filePath = `./${result.filename || 'download'}`;
+            const writeStream = fs.createWriteStream(filePath);
+            result.stream.pipe(writeStream);
+            writeStream.on('finish', () => {
+                msg.reply(
+                    `Media saved to ${filePath} (${result.mimetype}, ${result.filesize} bytes)`,
+                );
+            });
+        }
     } else if (msg.body === '!mediainfo' && msg.hasMedia) {
         const attachmentData = await msg.downloadMedia();
         msg.reply(`
