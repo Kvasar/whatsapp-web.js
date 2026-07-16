@@ -828,21 +828,9 @@ exports.LoadUtils = () => {
             msg.replyButtons = JSON.parse(JSON.stringify(msg.replyButtons));
         }
 
-        if (msg.id) {
-            let remote = msg.id.remote;
-            if (typeof remote === 'object' && remote) {
-                remote = remote._serialized;
-            }
-            // serialize() often drops MessageKey._serialized (prototype getter).
-            // Rebuild it so Node-side message.id._serialized is always present.
-            const serialized =
-                msg.id._serialized ||
-                (remote != null && msg.id.id != null
-                    ? `${msg.id.fromMe}_${remote}_${msg.id.id}`
-                    : undefined);
+        if (typeof msg.id.remote === 'object') {
             msg.id = Object.assign({}, msg.id, {
-                remote,
-                ...(serialized ? { _serialized: serialized } : {}),
+                remote: msg.id.remote._serialized,
             });
         }
 
